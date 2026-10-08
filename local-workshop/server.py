@@ -42,13 +42,18 @@ class Store:
             raise ValueError("项目 ID 无效")
         return self.root / pid
 
-    def read(self, pid):
+    def read(self, pid, include_deleted=False):
         with self.lock:
-            return json.loads((self.folder(pid) / "project.json").read_text(encoding="utf-8"))
+            value = json.loads((self.folder(pid) / "project.json").read_text(encoding="utf-8"))
+            if value.get("deletedAt") and not include_deleted:
+                raise FileNotFoundError("项目已在回收站")
+            return value
 
     def save(self, project, pid=None, expected=None):
         clean = engine.validate_project(project)
         with self.lock:
+            if pid is not None and not (self.folder(pid) / "project.json").exists():
+                raise FileNotFoundError("项目不存在")
             pid = pid or uuid.uuid4().hex
             folder = self.folder(pid)
             version = 0
@@ -67,13 +72,31 @@ class Store:
         temp.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
         os.replace(temp, path)
 
-    def listing(self):
+    def set_deleted(self, pid, expected, deleted):
+        with self.lock:
+            p = self.read(pid, include_deleted=True)
+            if p["version"] != expected:
+                raise Conflict("项目已更新，请刷新项目列表后重试")
+            if bool(p.get("deletedAt")) == deleted:
+                raise Conflict("项目状态已改变，请刷新列表")
+            p["version"] += 1
+            if deleted:
+                p["deletedAt"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            else:
+                p.pop("deletedAt", None)
+            self.atomic(self.folder(pid) / "project.json", p)
+            return {"id": pid, "version": p["version"], "deleted": deleted}
+
+    def listing(self, deleted=False):
         with self.lock:
             items = []
             for path in self.root.glob("*/project.json"):
                 try:
                     p = json.loads(path.read_text(encoding="utf-8"))
-                    items.append({k: p[k] for k in ("id", "name", "settings", "updatedAt")} | {"clips": len(p["clips"])})
+                    if bool(p.get("deletedAt")) != deleted:
+                        continue
+                    thumbnail = engine.encode_image(engine.flatten(p["clips"][0]["frames"][0], (p["settings"]["width"], p["settings"]["height"]))) if p["clips"] else None
+                    items.append({k: p[k] for k in ("id", "name", "settings", "updatedAt", "version")} | {"clips": len(p["clips"]), "thumbnail": thumbnail, "deletedAt": p.get("deletedAt")})
                 except (OSError, ValueError, KeyError):
                     continue
             return sorted(items, key=lambda p: p["updatedAt"], reverse=True)
@@ -280,12 +303,15 @@ def make_handler(store, jobs, cloud=False, password=""):
                     return self.output(dict(csrf=csrf, cloud=cloud, presets=engine.PRESETS, version="1.0.0"))
                 if path == "/api/projects":
                     return self.output(store.listing())
+                if path == "/api/trash":
+                    return self.output(store.listing(deleted=True))
                 if path.startswith("/api/projects/"):
                     return self.output(store.read(path.rsplit("/", 1)[-1]))
                 if path.startswith("/api/jobs/"):
                     return self.output(jobs.snapshot(path.rsplit("/", 1)[-1]))
                 match = re.fullmatch(r"/api/sources/([a-f0-9]{32})(?:/([a-f0-9]{32}))?", path)
                 if match:
+                    store.read(match[1])
                     folder = store.folder(match[1]) / "sources"
                     if match[2]:
                         return self.output((folder / f"{match[2]}.png").read_bytes(), mime="image/png", filename=f"{match[2]}.png")
@@ -310,6 +336,11 @@ def make_handler(store, jobs, cloud=False, password=""):
                     raise ValueError("请求大小超出限制（48 MB）")
                 p = json.loads(self.rfile.read(length))
                 path = urlsplit(self.path).path
+                if path in ("/api/delete-project", "/api/restore-project"):
+                    with jobs.lock:
+                        if jobs.busy(p["id"]):
+                            raise Conflict("此项目正在生成，请等待结束后再操作")
+                        return self.output(store.set_deleted(p["id"], p["version"], path == "/api/delete-project"))
                 if path == "/api/save":
                     with jobs.lock:
                         if p.get("id") and jobs.busy(p["id"]):
@@ -335,7 +366,7 @@ def make_handler(store, jobs, cloud=False, password=""):
                             raise ValueError("验收状态无效")
                         if state == "accepted" and not report["technicalPass"]:
                             raise ValueError("请先修复检查中的阻断问题")
-                        clip["review"] = dict(state=state, hash=engine.clip_hash(clip, (project["settings"]["width"], project["settings"]["height"])))
+                        clip["review"] = dict(state=state, hash=engine.appearance_hash(clip, (project["settings"]["width"], project["settings"]["height"]), project["settings"]))
                         return self.output(store.save(project, project["id"], project["version"]))
                 if path == "/api/export":
                     project = store.read(p["id"])

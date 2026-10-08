@@ -191,6 +191,20 @@ class HttpTests(unittest.TestCase):
         req=urllib.request.Request(self.url+path,json.dumps(body).encode(),headers={"Content-Type":"application/json","X-Workshop":self.csrf}|(headers or {}))
         with urllib.request.urlopen(req) as r:return json.load(r)
 
+    def test_delete_restore_http_guards(self):
+        p=self.post('/api/save',{'project':project()});body=dict(id=p['id'],version=p['version'])
+        with patch.object(self.jobs,'busy',return_value=True):
+            with self.assertRaises(urllib.error.HTTPError) as c:self.post('/api/delete-project',body)
+            self.assertEqual(c.exception.code,409)
+        with self.assertRaises(urllib.error.HTTPError) as c:self.post('/api/delete-project',body,{'X-Workshop':''})
+        self.assertEqual(c.exception.code,403)
+        deleted=self.post('/api/delete-project',body)
+        self.assertEqual(self.get('/api/projects'),[]);self.assertEqual(len(self.get('/api/trash')),1)
+        with self.assertRaises(urllib.error.HTTPError) as c:self.get('/api/projects/'+p['id'])
+        self.assertEqual(c.exception.code,404)
+        self.post('/api/restore-project',dict(id=p['id'],version=deleted['version']))
+        self.assertEqual(self.get('/api/projects/'+p['id'])['name'],p['name'])
+
     def test_save_review_export_and_reopen(self):
         p=self.post("/api/save",{"project":project()})
         p=self.post("/api/review",dict(id=p["id"],version=p["version"],clipId="walk_e",state="accepted"))

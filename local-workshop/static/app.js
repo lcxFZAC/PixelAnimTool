@@ -1,3 +1,4 @@
+import {buildNormalMap} from './normal-map.mjs';
 const $ = id => document.getElementById(id);
 const clone = value => structuredClone(value);
 const dirs = {s:'正面',e:'向右',n:'背面',w:'向左'};
@@ -42,26 +43,29 @@ class Preview {
     const shader=(type,source)=>{const s=gl.createShader(type);gl.shaderSource(s,source);gl.compileShader(s);if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw Error(gl.getShaderInfoLog(s));return s;};
     const program=gl.createProgram();gl.attachShader(program,shader(gl.VERTEX_SHADER,'attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}'));
     gl.attachShader(program,shader(gl.FRAGMENT_SHADER,`precision mediump float;
-      uniform sampler2D tex;uniform vec2 resolution;uniform vec2 origin;uniform vec2 size;uniform float zoom;uniform float ratio;uniform float grid;
-      void main(){vec2 p=vec2(gl_FragCoord.x/ratio,resolution.y-gl_FragCoord.y/ratio);float ck=mod(floor(p.x/12.)+floor(p.y/12.),2.);vec3 bg=mix(vec3(.933,.941,.914),vec3(.960,.965,.945),ck);vec2 uv=(p-origin)/(size*zoom);if(uv.x>=0.&&uv.y>=0.&&uv.x<1.&&uv.y<1.){vec4 c=texture2D(tex,uv);bg=mix(bg,c.rgb,c.a);if(grid>.5&&zoom>=6.){vec2 cell=mod(p-origin,zoom);if(cell.x<.65||cell.y<.65)bg=mix(bg,vec3(.2,.3,.2),.12);}}gl_FragColor=vec4(bg,1.);}`));
+      uniform sampler2D tex;uniform sampler2D normals;uniform float mode;uniform vec3 light;uniform vec2 resolution;uniform vec2 origin;uniform vec2 size;uniform float zoom;uniform float ratio;uniform float grid;
+      void main(){vec2 p=vec2(gl_FragCoord.x/ratio,resolution.y-gl_FragCoord.y/ratio);float ck=mod(floor(p.x/12.)+floor(p.y/12.),2.);vec3 bg=mix(vec3(.933,.941,.914),vec3(.960,.965,.945),ck);vec2 uv=(p-origin)/(size*zoom);if(uv.x>=0.&&uv.y>=0.&&uv.x<1.&&uv.y<1.){vec4 c=texture2D(tex,uv);if(mode>1.5){c.rgb=texture2D(normals,uv).rgb;}else if(mode>.5){vec3 n=normalize(texture2D(normals,uv).rgb*2.-1.);float lambert=max(dot(n,normalize(light)),0.);vec3 lighting=vec3(.30,.34,.40)+vec3(.95,.88,.75)*lambert;c.rgb=pow(clamp(pow(c.rgb,vec3(2.2))*lighting,0.,1.),vec3(1./2.2));}bg=mix(bg,c.rgb,c.a);if(grid>.5&&zoom>=6.){vec2 cell=mod(p-origin,zoom);if(cell.x<.65||cell.y<.65)bg=mix(bg,vec3(.2,.3,.2),.12);}}gl_FragColor=vec4(bg,1.);}`));
     gl.linkProgram(program);if(!gl.getProgramParameter(program,gl.LINK_STATUS))throw Error(gl.getProgramInfoLog(program));gl.useProgram(program);this.program=program;
     const buffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buffer);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,1,1]),gl.STATIC_DRAW);const attr=gl.getAttribLocation(program,'p');gl.enableVertexAttribArray(attr);gl.vertexAttribPointer(attr,2,gl.FLOAT,false,0,0);
     this.texture=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,this.texture);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
-    this.loc=Object.fromEntries(['resolution','origin','size','zoom','ratio','grid'].map(k=>[k,gl.getUniformLocation(program,k)]));
+    this.normalTexture=gl.createTexture();gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,this.normalTexture);for(const param of [gl.TEXTURE_MIN_FILTER,gl.TEXTURE_MAG_FILTER])gl.texParameteri(gl.TEXTURE_2D,param,gl.NEAREST);for(const param of [gl.TEXTURE_WRAP_S,gl.TEXTURE_WRAP_T])gl.texParameteri(gl.TEXTURE_2D,param,gl.CLAMP_TO_EDGE);gl.uniform1i(gl.getUniformLocation(program,'normals'),1);gl.activeTexture(gl.TEXTURE0);
+    this.loc=Object.fromEntries(['mode','light','resolution','origin','size','zoom','ratio','grid'].map(k=>[k,gl.getUniformLocation(program,k)]));
     canvas.addEventListener('webglcontextlost',e=>{e.preventDefault();playing=false;toast('WebGL 上下文丢失。项目仍可保存；刷新页面恢复预览。',true);});
     canvas.addEventListener('webglcontextrestored',()=>location.reload());
   }
   draw(image){
+    const mode=project?.settings.hd2d?Number($('viewMode').value):0;
+    let normalImage=null;if(mode){normalImage=makeCanvas(image.width,image.height);const pixels=image.getContext('2d').getImageData(0,0,image.width,image.height);normalImage.getContext('2d').putImageData(new ImageData(buildNormalMap(pixels.data,image.width,image.height,project.settings.normalStrength||65),image.width,image.height),0,0);}
     const r=stage.getBoundingClientRect(),dpr=window.devicePixelRatio||1,w=Math.max(1,r.width),h=Math.max(1,r.height);
     const cw=Math.round(w*dpr),ch=Math.round(h*dpr);if(this.canvas.width!==cw||this.canvas.height!==ch){this.canvas.width=cw;this.canvas.height=ch;}
     transform={x:Math.round((w-image.width*zoom)/2+pan.x),y:Math.round((h-image.height*zoom)/2+pan.y),w:image.width,h:image.height};
-    if(this.gl){const gl=this.gl;gl.viewport(0,0,cw,ch);gl.useProgram(this.program);gl.bindTexture(gl.TEXTURE_2D,this.texture);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,image);gl.uniform2f(this.loc.resolution,w,h);gl.uniform2f(this.loc.origin,transform.x,transform.y);gl.uniform2f(this.loc.size,image.width,image.height);gl.uniform1f(this.loc.zoom,zoom);gl.uniform1f(this.loc.ratio,dpr);gl.uniform1f(this.loc.grid,$('gridToggle').checked?1:0);gl.drawArrays(gl.TRIANGLE_STRIP,0,4);}
-    else{const ctx=this.ctx;ctx.setTransform(dpr,0,0,dpr,0,0);ctx.fillStyle='#f0f2eb';ctx.fillRect(0,0,w,h);ctx.imageSmoothingEnabled=false;ctx.drawImage(image,transform.x,transform.y,image.width*zoom,image.height*zoom);}
+    if(this.gl){const gl=this.gl;gl.viewport(0,0,cw,ch);gl.useProgram(this.program);gl.uniform1f(this.loc.mode,mode);const angle=Number($('lightAngle').value)*Math.PI/180;gl.uniform3f(this.loc.light,Math.cos(angle),Math.sin(angle),.65);if(normalImage){gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,this.normalTexture);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,normalImage);}gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,this.texture);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,image);gl.uniform2f(this.loc.resolution,w,h);gl.uniform2f(this.loc.origin,transform.x,transform.y);gl.uniform2f(this.loc.size,image.width,image.height);gl.uniform1f(this.loc.zoom,zoom);gl.uniform1f(this.loc.ratio,dpr);gl.uniform1f(this.loc.grid,$('gridToggle').checked?1:0);gl.drawArrays(gl.TRIANGLE_STRIP,0,4);}
+    else{const ctx=this.ctx;ctx.setTransform(dpr,0,0,dpr,0,0);ctx.fillStyle='#f0f2eb';ctx.fillRect(0,0,w,h);ctx.imageSmoothingEnabled=false;ctx.drawImage(mode===2?normalImage:image,transform.x,transform.y,image.width*zoom,image.height*zoom);}
     if(selection){Object.assign($('selectionBox').style,{left:`${transform.x+selection.x*zoom}px`,top:`${transform.y+selection.y*zoom}px`,width:`${selection.w*zoom}px`,height:`${selection.h*zoom}px`});$('selectionBox').hidden=false;}else $('selectionBox').hidden=true;
   }
 }
 let preview;
-function draw(){if(preview)preview.draw(composite(frameIndex,$('onionToggle').checked&&!playing));$('pixelPosition').textContent=gesture?`${gesture.last.x}, ${gesture.last.y}`:$('pixelPosition').textContent;}
+function draw(){if(preview)preview.draw(composite(frameIndex,$('onionToggle').checked&&!playing&&(!project?.settings.hd2d||$('viewMode').value==='0')));$('pixelPosition').textContent=gesture?`${gesture.last.x}, ${gesture.last.y}`:$('pixelPosition').textContent;}
 async function refresh(){
   const gen=++renderGeneration;
   const newCache=clip()?await Promise.all(clip().frames.map(f=>Promise.all(f.layers.map(l=>imageCanvas(l.data))))):[];
@@ -75,6 +79,7 @@ function renderUI(){
   $('workspaceSubtitle').textContent=clip()?`${info.presets.actions[clip().action]?.name||clip().id} · ${dirs[clip().direction]||'自定义方向'} · ${clip().frames.length} 帧`:'从角色立绘到可用图集，在一个空间里完成。';
   $('referencePreview').hidden=!project?.reference;$('uploadHint').hidden=!!project?.reference;if(project?.reference)$('referencePreview').src=project.reference;else $('referencePreview').removeAttribute('src');
   const cfg=project?.settings||readSettings();$('styleSelect').value=cfg.style;$('sizeSelect').value=`${cfg.width},${cfg.height}`;if(!$('sizeSelect').value)$('sizeSelect').append(option(`${cfg.width},${cfg.height}`,`${cfg.width} × ${cfg.height}`));$('sizeSelect').value=`${cfg.width},${cfg.height}`;$('ppuSelect').value=cfg.ppu;if(!$('ppuSelect').value){$('ppuSelect').append(option(cfg.ppu,cfg.ppu));$('ppuSelect').value=cfg.ppu;}$('colorsInput').value=cfg.colors;if(cfg.outline!=='none')$('outlineInput').value=cfg.outline;
+  if(!!cfg.hd2d!==$('hd2dEnabled').checked)$('viewMode').value='1';$('hd2dEnabled').checked=!!cfg.hd2d;$('normalStrength').value=cfg.normalStrength||65;$('normalStrengthValue').textContent=cfg.normalStrength||65;$('normalStrengthField').hidden=!cfg.hd2d;$('hd2dControls').hidden=!cfg.hd2d;updateProjectLabel();
   $('sizeSelect').disabled=!!project?.clips.length;$('worldSize').textContent=`${cfg.width} × ${cfg.height} px · 画布 ${(cfg.width/cfg.ppu).toFixed(2)} × ${(cfg.height/cfg.ppu).toFixed(2)} 世界单位`;
   $('masterInfo').textContent=Object.keys(project?.masters||{}).length?`已固定：${Object.keys(project.masters).map(d=>dirs[d]).join('、')}`:'未固定方向母版';
   $('emptyState').hidden=!!clip();$('canvasLabel').textContent=clip()?`${cfg.width} × ${cfg.height} · ${cfg.ppu} PPU`:'还没有动作';
@@ -83,6 +88,7 @@ function renderUI(){
   $('frameCounter').textContent=`${clip()?frameIndex+1:0} / ${clip()?.frames.length||0}`;$('fpsInput').value=clip()?.fps||10;$('loopToggle').checked=clip()?.loop??true;$('playBtn').textContent=playing?'Ⅱ':'▶';
   renderTimeline();renderReport();
   for(const id of ['saveBtn','exportBtn','blankBtn','deleteClip','importBtn','addLayer','layerUp','layerDown','renameLayer','deleteLayer','newFrame','duplicateFrame','deleteFrame','frameLeft','frameRight','pinMaster','reviewSelect'])$(id).disabled=!!currentJob;
+  for(const id of ['hd2dEnabled','normalStrength'])$(id).disabled=!!currentJob;
   $('newBtn').disabled=!!currentJob;$('projectSelect').disabled=!!currentJob;
   $('generateBtn').disabled=!$('geminiEnabled').checked||!!currentJob;
   $('undoBtn').disabled=!undoStack.length||!!currentJob;$('redoBtn').disabled=!redoStack.length||!!currentJob;
@@ -100,7 +106,7 @@ function renderReport(){
   if(c.report){add(`${c.report.uniqueFrames} 个不同帧 · ${c.report.colors} 种颜色`);for(const b of c.report.blockers)add(b,'error');for(const w of c.report.warnings)add(w,'warn');if(c.report.technicalPass)add('结构检查通过 · 仍需检查身份、手形、配饰与动作。');}
   else add('保存后检查像素结构。');
 }
-function readSettings(){const [width,height]=($('sizeSelect').value||'96,128').split(',').map(Number);return {width,height,ppu:Number($('ppuSelect').value||48),style:$('styleSelect').value||'jiuzhen',colors:Number($('colorsInput').value||32),outline:$('outlineInput').value||'#0b0e14'};}
+function readSettings(){const [width,height]=($('sizeSelect').value||'96,128').split(',').map(Number);return {width,height,ppu:Number($('ppuSelect').value||48),style:$('styleSelect').value||'jiuzhen',colors:Number($('colorsInput').value||32),outline:$('outlineInput').value||'#0b0e14',hd2d:$('hd2dEnabled').checked,normalStrength:Number($('normalStrength').value)};}
 function ensureProject(){if(!project){project={name:$('projectName').value||'未命名角色',settings:readSettings(),reference:null,masters:{},clips:[]};mutation=0;savedMutation=0;}return project;}
 function ensureEditable(){if(currentJob)throw Error('生成期间暂不能修改项目，请等待完成或取消任务。');ensureProject();}
 function remember(){ensureEditable();undoStack.push({project:clone(project),clipIndex,frameIndex,layerIndex});if(undoStack.length>24)undoStack.shift();redoStack=[];}
@@ -117,10 +123,19 @@ async function save(){
   }).catch(error=>{$('saveStatus').textContent='保存失败 · 请重试';throw error;}).finally(()=>saving=null);
   await saving;if(mutation!==savedMutation)return save();return project;
 }
-async function listProjects(){const items=await request('/api/projects');$('projectSelect').replaceChildren(option('','选择已保存项目'),...items.map(p=>option(p.id,`${p.name} · ${p.clips} 个动作`)));$('projectSelect').value=project?.id||'';}
+let projectItems=[],trashItems=[],pickerTrash=false;
+function updateProjectLabel(){ $('projectSelectionName').textContent=project?.name||'选择角色项目';$('projectSelectionMeta').textContent=project?`${project.clips.length} 个动作 · ${project.settings.ppu} PPU`:'你的像素角色收藏'; }
+function closeProjectPicker(){ $('projectPicker').hidden=true;$('projectSelect').setAttribute('aria-expanded','false'); }
+function renderProjectPicker(){
+  updateProjectLabel();$('projectActiveTab').classList.toggle('active',!pickerTrash);$('projectTrashTab').classList.toggle('active',pickerTrash);$('projectTrashTab').textContent=`回收站 · ${trashItems.length}`;
+  const search=$('projectSearch').value.trim().toLowerCase(),items=(pickerTrash?trashItems:projectItems).filter(p=>p.name.toLowerCase().includes(search));
+  $('projectList').replaceChildren(...items.map(p=>{const row=document.createElement('div');row.className=`project-row ${p.id===project?.id?'selected':''}`;const open=document.createElement('button');open.className='project-open';open.disabled=pickerTrash;const thumb=document.createElement('span');thumb.className='project-thumb';if(p.thumbnail){const img=document.createElement('img');img.src=p.thumbnail;img.alt='';thumb.append(img);}else thumb.textContent='▦';const text=document.createElement('span'),name=document.createElement('strong'),meta=document.createElement('small');name.textContent=p.name;meta.textContent=`${p.clips} 动作 · ${p.settings.width}×${p.settings.height} · ${p.settings.ppu} PPU${p.settings.hd2d?' · HD2D':''}`;text.append(name,meta);open.append(thumb,text);open.onclick=guarded(async()=>{await loadProject(p.id);closeProjectPicker();});const action=document.createElement('button');action.className='project-action';action.textContent=pickerTrash?'恢复':'删除';action.setAttribute('aria-label',`${action.textContent}项目 ${p.name}`);action.onclick=guarded(async()=>{if(currentJob)throw Error('请先结束生成任务');await save();const latest=pickerTrash?trashItems.find(x=>x.id===p.id):projectItems.find(x=>x.id===p.id);await request(pickerTrash?'/api/restore-project':'/api/delete-project',{id:p.id,version:latest.version});if(!pickerTrash&&project?.id===p.id){project=null;mutation=savedMutation=0;undoStack=[];redoStack=[];selection=null;playing=false;clipIndex=frameIndex=layerIndex=0;await refresh();}toast(pickerTrash?'项目已恢复':'已移入回收站，可随时恢复');await listProjects();});row.append(open,action);return row;}));
+  if(!items.length){const empty=document.createElement('p');empty.className='project-empty';empty.textContent=search?'没有匹配的角色':pickerTrash?'回收站是空的':'新建一个角色，开始你的收藏';$('projectList').append(empty);}
+}
+async function listProjects(){[projectItems,trashItems]=await Promise.all([request('/api/projects'),request('/api/trash')]);renderProjectPicker();}
 async function loadProject(id){await save();project=await request(`/api/projects/${id}`);clipIndex=0;frameIndex=0;layerIndex=0;undoStack=[];redoStack=[];mutation=0;savedMutation=0;selection=null;pan={x:0,y:0};$('saveStatus').textContent='已保存';await refresh();}
 async function askName(title,initial){$('textTitle').textContent=title;$('textInput').value=initial;$('textDialog').showModal();$('textInput').select();return new Promise(resolve=>{const done=value=>{$('textDialog').close();$('textForm').onsubmit=null;$('textCancel').onclick=null;$('textDialog').oncancel=null;resolve(value);};$('textForm').onsubmit=e=>{e.preventDefault();done($('textInput').value.trim());};$('textCancel').onclick=()=>done(null);$('textDialog').oncancel=e=>{e.preventDefault();done(null);};});}
-async function newProject(){ensureEditable();await save();const name=await askName('新建角色项目','新角色');if(!name)return;project={name,settings:readSettings(),reference:null,masters:{},clips:[]};mutation=1;savedMutation=0;clipIndex=frameIndex=layerIndex=0;undoStack=[];redoStack=[];selection=null;pan={x:0,y:0};await save();await refresh();}
+async function newProject(){if(currentJob)throw Error('请先结束生成任务');await save();const name=await askName('新建角色项目','新角色');if(!name)return;project={name,settings:readSettings(),reference:null,masters:{},clips:[]};mutation=1;savedMutation=0;clipIndex=frameIndex=layerIndex=0;undoStack=[];redoStack=[];selection=null;pan={x:0,y:0};await save();await refresh();}
 async function blankClip(){ensureEditable();const name=await askName('动作 ID（小写字母、数字、下划线）',`custom_${project.clips.length+1}`);if(!name)return;if(!/^[a-z][a-z0-9_]{0,63}$/.test(name))throw Error('请使用 snake_case，如 walk_e');if(project.clips.some(c=>c.id===name))throw Error('动作名称已存在');remember();project.clips.push({id:name,action:'custom',direction:'s',fps:10,loop:true,frames:[{layers:[{name:'底稿',visible:true,data:emptyData()}]}],review:{state:'candidate'}});clipIndex=project.clips.length-1;frameIndex=layerIndex=0;selection=null;changed();await refresh();}
 
 function colorRGBA(){const c=$('paintColor').value;return [parseInt(c.slice(1,3),16),parseInt(c.slice(3,5),16),parseInt(c.slice(5,7),16),255];}
@@ -193,11 +208,16 @@ async function pollJob(){
   }catch(error){toast(error.message,true);currentJob=null;sessionStorage.removeItem('pixel-workshop-job');renderUI();}
   finally{polling=false;if(currentJob)setTimeout(pollJob,2000);}
 }
-async function copyPrompt(){const a=$('actionSelect').value,d=$('directionSelect').value,cfg=readSettings(),spec=info.presets.actions[a],sty=info.presets.styles.find(s=>s.id===cfg.style),n=spec.frames,grid=n===8?'4 列 2 行':n===6?'3 列 2 行':'2 列 2 行';const prompt=`以我上传的正面立绘锁定身份，制作 ${a} / ${dirs[d]} 的独立动作图集。风格：${sty.description}\n精确 ${n} 帧，${grid}，每格相同，预留空白，纯洋红 #ff00ff 背景，无文字与网格线。目标原生格 ${cfg.width}×${cfg.height}，固定描边 ${cfg.outline}，共享 ${cfg.colors} 色。\n相位：${spec.phases.join(' → ')}\n${spec.rule}\n禁止复制、镜像或整体平移冒充动画。服饰、配饰侧别和头脸比例保持稳定。\n用户补充：${$('keyword').value}\n输出实际图稿，未经过精确像素处理和逐帧验收前标记为候选。`;await navigator.clipboard.writeText(prompt);toast('当前单个动作的生成要求已复制，可粘贴到 Gem 对话。');}
+async function copyPrompt(){const a=$('actionSelect').value,d=$('directionSelect').value,cfg=readSettings(),spec=info.presets.actions[a],sty=info.presets.styles.find(s=>s.id===cfg.style),n=spec.frames,grid=n===8?'4 列 2 行':n===6?'3 列 2 行':'2 列 2 行';const prompt=`以我上传的正面立绘锁定身份，制作 ${a} / ${dirs[d]} 的独立动作图集。风格：${sty.description}${cfg.hd2d?"。HD2D 像素体积构形：用明确色块表现衣褶、遮挡与圆润体积，保持中性漫反射色稿，避免烘焙强方向光和投影。只输出颜色图；法线由工坊逐帧生成。":""}\n精确 ${n} 帧，${grid}，每格相同，预留空白，纯洋红 #ff00ff 背景，无文字与网格线。目标原生格 ${cfg.width}×${cfg.height}，固定描边 ${cfg.outline}，共享 ${cfg.colors} 色。\n相位：${spec.phases.join(' → ')}\n${spec.rule}\n禁止复制、镜像或整体平移冒充动画。服饰、配饰侧别和头脸比例保持稳定。\n用户补充：${$('keyword').value}\n输出实际图稿，未经过精确像素处理和逐帧验收前标记为候选。`;await navigator.clipboard.writeText(prompt);toast('当前单个动作的生成要求已复制，可粘贴到 Gem 对话。');}
 
 on('newBtn','click',newProject);on('blankBtn','click',blankClip);on('emptyBlank','click',blankClip);on('saveBtn','click',async()=>{await save();toast('项目已保存。');});
 on('deleteClip','click',async()=>{ensureEditable();if(!clip())return;remember();project.clips.splice(clipIndex,1);clipIndex=Math.min(clipIndex,Math.max(0,project.clips.length-1));frameIndex=layerIndex=0;selection=null;playing=false;changed(false);await refresh();toast('动作已移除，可用撤销恢复。');});
-on('projectSelect','change',async()=>{const id=$('projectSelect').value;if(id)await loadProject(id);});
+on('projectSelect','click',async()=>{const open=$('projectPicker').hidden;$('projectPicker').hidden=!open;$('projectSelect').setAttribute('aria-expanded',String(open));if(open){await listProjects();$('projectSearch').focus();}});
+on('projectSearch','input',renderProjectPicker);on('projectActiveTab','click',()=>{pickerTrash=false;renderProjectPicker();});on('projectTrashTab','click',()=>{pickerTrash=true;renderProjectPicker();});
+document.addEventListener('pointerdown',e=>{if(!e.target.closest('.project-switcher'))closeProjectPicker();});$('projectPicker').addEventListener('keydown',e=>{if(e.key==='Escape'){closeProjectPicker();$('projectSelect').focus();}});
+on('viewMode','change',()=>{if(!preview.gl&&$('viewMode').value==='1')toast('当前 Canvas 兼容模式仅显示原始色稿；光照需要 WebGL。');draw();});on('lightAngle','input',draw);
+on('normalStrength','input',()=>{$('normalStrengthValue').textContent=$('normalStrength').value;});
+for(const id of ['hd2dEnabled','normalStrength'])on(id,'change',async()=>{ensureEditable();remember();project.settings=readSettings();$('viewMode').value='1';changed(false);await refresh();});
 on('projectName','input',()=>{ensureEditable();project.name=$('projectName').value.trim()||'未命名角色';changed(false);$('workspaceTitle').textContent=project.name;});
 on('referenceInput','change',()=>setReference($('referenceInput').files[0]));on('clearReference','click',async()=>{ensureEditable();remember();project.reference=null;changed(false);await refresh();});
 $('dropzone').addEventListener('dragover',e=>{e.preventDefault();$('dropzone').classList.add('drag');});$('dropzone').addEventListener('dragleave',()=>$('dropzone').classList.remove('drag'));on('dropzone','drop',async e=>{e.preventDefault();$('dropzone').classList.remove('drag');await setReference(e.dataTransfer.files[0]);});on('dropzone','keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();$('referenceInput').click();}});
@@ -218,7 +238,7 @@ on('sourcesBtn','click',async()=>{if(!project?.id)throw Error('先保存项目')
 for(const id of ['helpBtn'])on(id,'click',()=>$('helpDialog').showModal());for(const id of ['closeHelp','closeHelpBottom'])on(id,'click',()=>$('helpDialog').close());on('workspaceTab','click',()=>$('helpDialog').close());
 on('shutdownBtn','click',async()=>{await save();await request('/api/shutdown',{});toast('服务已退出，可以关闭页面。');$('connection').textContent='服务已退出';});
 document.addEventListener('keydown',guarded(async e=>{
-  if(['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)||document.querySelector('dialog[open]'))return;
+  if(document.activeElement.closest('.project-switcher')||['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)||document.querySelector('dialog[open]'))return;
   if(e.ctrlKey||e.metaKey){const key=e.key.toLowerCase();if(['z','y','s','c','v'].includes(key))e.preventDefault();if(key==='z')return history(e.shiftKey);if(key==='y')return history(true);if(key==='s')return save();
     if(key==='c'&&selection&&activeCanvas()){clipboard=makeCanvas(selection.w,selection.h);clipboard.getContext('2d').drawImage(activeCanvas(),selection.x,selection.y,selection.w,selection.h,0,0,selection.w,selection.h);toast('已复制选区。');}
     if(key==='v'&&clipboard&&activeCanvas()){ensureEditable();remember();const x=selection?.x||0,y=selection?.y||0;activeCanvas().getContext('2d').drawImage(clipboard,x,y);layer().data=activeCanvas().toDataURL();selection={x,y,w:clipboard.width,h:clipboard.height};changed();renderTimeline();draw();}return;
