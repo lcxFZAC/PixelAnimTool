@@ -1,0 +1,23 @@
+{
+  "styles": [
+    {"id":"jiuzhen","name":"玖镇 · 清晰国风","colors":32,"outline":"#0b0e14","description":"Chinese HD-2D RPG pixel character, readable face and clothing, restrained colors, coherent pixel clusters, dark single-pixel outline, low relaxed walking steps. Preserve Chinese costume construction and accessory laterality."},
+    {"id":"adventure","name":"冒险 · 硬边像素","colors":24,"outline":"#172038","description":"Crisp adventure RPG pixel character, readable silhouette, compact deliberate clusters, restrained 3-tone material shading and dark single-pixel outlines. No blur, no subpixel antialiasing."},
+    {"id":"soft","name":"田园 · 柔和像素","colors":24,"outline":"#394536","description":"Gentle pastoral pixel character, warm muted material palette, clean silhouette, economical pixel clusters, subtle dark outline. No painterly texture, no antialiasing."}
+  ],
+  "sizes": [[96,128],[64,96],[48,64],[128,128]],
+  "ppu": [16,24,32,48,64,96],
+  "actions": {
+    "idle":{"name":"待机","frames":4,"fps":2,"phases":["neutral","inhale","breath apex","exhale"],"rule":"Feet and head remain fixed. Only chest, hands and connected sleeves breathe slightly. Belt ornaments remain fixed to torso."},
+    "walk":{"name":"行走","frames":8,"fps":10,"phases":["near foot forward contact","near foot bears weight","far foot passes low by supporting ankle","far foot reaches forward","far foot forward contact","far foot bears weight","near foot passes low by supporting ankle","near foot reaches forward"],"rule":"Alternate support feet with opposite arm swing. Relaxed low passing foot, no high knees, no whole-body translation pretending to walk."},
+    "battle_idle":{"name":"战斗待机","frames":4,"fps":4,"phases":["ready","breathe in","hold guard","breathe out"],"rule":"Stable grounded combat stance; preserve weapon hand and weapon shape."},
+    "attack":{"name":"普通攻击","frames":6,"fps":10,"phases":["ready","anticipation","windup","strike impact","follow through","recover"],"rule":"Readable weight transfer, consistent weapon, grounded support foot; no missing hands."},
+    "cast":{"name":"施法","frames":6,"fps":8,"phases":["ready","gather","raise hand","release","settle","recover"],"rule":"Readable hand gesture, no baked VFX obscuring character; preserve accessories."},
+    "hit":{"name":"受击","frames":4,"fps":8,"phases":["ready","impact","recoil","recover"],"rule":"Clear recoil then recover, no morphing or dismemberment."},
+    "death":{"name":"倒地","frames":6,"fps":8,"phases":["stagger","knees buckle","fall","ground contact","settle","rest"],"rule":"One-way collapse, not a loop; final frame remains on ground."}
+  },
+  "packs": {
+    "movement":{"name":"移动包 · 四向待机与行走","actions":["idle","walk"],"directions":["s","e","n","w"]},
+    "battle":{"name":"战斗包 · 侧视向右","actions":["battle_idle","attack","cast","hit","death"],"directions":["e"]},
+    "single":{"name":"单个动作","actions":[],"directions":[]}
+  }
+}

@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: pixel-workshop-online
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./gem-online/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    envVars:
+      - key: WORKSHOP_ACCESS_TOKEN
+        generateValue: true
+      - key: PORT
+        value: "10000"
+    disk:
+      name: workshop-data
+      mountPath: /data
+      sizeGB: 1
