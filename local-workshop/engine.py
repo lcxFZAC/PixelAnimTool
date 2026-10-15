@@ -70,8 +70,11 @@ def settings(value):
     hd2d = value.get("hd2d", False)
     if not isinstance(hd2d, bool):
         raise ValueError("HD2D 开关必须是布尔值")
+    fixer = value.get('pixelFixer', False)
+    if not isinstance(fixer, bool):
+        raise ValueError('Pixel Art Fixer 开关必须是布尔值')
     strength = integer(value.get("normalStrength", 65), 1, 100, "法线起伏")
-    return dict(width=w, height=h, ppu=ppu, style=style, colors=colors, outline=outline, hd2d=hd2d, normalStrength=strength)
+    return dict(width=w, height=h, ppu=ppu, style=style, colors=colors, outline=outline, hd2d=hd2d, normalStrength=strength, pixelFixer=fixer)
 
 
 def flatten(frame, size):
@@ -189,7 +192,7 @@ def validate_project(p):
         clean["review"] = dict(state=state, hash=digest)
         # Only preserve serializable provenance; never copy arbitrary fields (e.g. API keys).
         provenance = c.get("provenance", {})
-        clean["provenance"] = {k: provenance[k] for k in ("sourceHash", "prompt", "model", "notes", "transform", "sourceId") if k in provenance}
+        clean["provenance"] = {k: provenance[k] for k in ("sourceHash", "prompt", "model", "notes", "transform", "sourceId", "pixelFixer") if k in provenance}
         clean["report"] = audit(clean, cfg)
         result.append(clean)
     reference = p.get("reference")

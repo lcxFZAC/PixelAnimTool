@@ -30,7 +30,7 @@ if (-not (Test-Path -LiteralPath $pythonExe)) {
 }
 & $pythonExe (Join-Path $workshopRoot 'check_dependencies.py')
 if ($LASTEXITCODE -ne 0) {
-    Write-Host 'Preparing Pillow in the project environment (first launch only)...'
+    Write-Host 'Preparing pixel processing dependencies in the project environment (first launch only)...'
     & $pythonExe -m pip install --disable-pip-version-check -r (Join-Path $workshopRoot 'requirements.txt')
     if ($LASTEXITCODE -ne 0) { throw 'Dependency download failed. Check your connection, then run this launcher again.' }
 }

@@ -1,0 +1,22 @@
+{
+  "repository": "https://github.com/Retro-Diffusion/pixel-art-fixer",
+  "commit": "ef376e57e1c272633ca2dbf5f29ec3fcf6596465",
+  "license": "MIT",
+  "filesSha256": {
+    "api.py": "7a694f1430e956bae24532e3c8e2323b6a8f91a72d0f867f1cd10f8c54bca795",
+    "autocorr.py": "f7a06098e4a5766d533cb3a218dbc43eeb9433c0a7a7e7d099a66cfb5ad16c26",
+    "channels.py": "7e1b3ec61c0f3c11188253a0cab73426f8132620d7edd12eb0f26d243c7d54e2",
+    "cli.py": "7194ca75662457fbd3d56dedf3c312163ac348f2be44af9293a74e8fe5d85200",
+    "colorspace.py": "8baa62ee07a4e82a5c4d0ae68f39b919a538639336b553f0aed011e1242d91f8",
+    "core.py": "853415024eee4206b378a9887eaa805bb3f7fb3c30c4518142f931d90d43b8a7",
+    "fusion.py": "9d69f5ec588229728ac358634aeb82de35092033010bad191d089136088b879b",
+    "quantize.py": "c3fc62bc0374b3e16f4bd9017a900d9a4e065e0b91a37a57d9e6304720b902aa",
+    "reconsearch.py": "e48b586b523ad4a415cdccc26456840a95ec9fe632c8380daaf25c0a98d4fd41",
+    "reconstruct.py": "205c495d17ba243c7612e35cf83f3ab9587abcde8c8e6c36b0169bdef201ddd5",
+    "runlengths.py": "f1f44bfeb268c16d064111f1768e8fa7611ddff5898de74b39a15c4917ea21bb",
+    "selfsim.py": "c53ef8dd12a3762cfcac00b2a4b955d104ae8626529597852511664e52a8471a",
+    "varcontrast.py": "fd4e9f0c815786f83fef87751ea5fcab50d417ed77f9d734ea879088c79d3697",
+    "__init__.py": "00f05d63e99b8a0c432b27619b8c0128a72a68ddce39841c7fcd918909dfb4f7"
+  },
+  "modifications": "Upstream Python sources unmodified from GitHub archive; wrapper calls pixelfixer.api.process because upstream CLI imports stale detector package."
+}

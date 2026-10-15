@@ -22,6 +22,7 @@ from urllib.parse import urlsplit
 
 from PIL import Image
 import engine
+import pixel_fixer
 
 ROOT = Path(__file__).resolve().parent
 MAX_BODY = 48 * 1024 * 1024
@@ -228,7 +229,10 @@ class Jobs:
                 (source_dir / f"{sid}.png").write_bytes(engine.png_bytes(raw))
                 (source_dir / f"{sid}.txt").write_text(prompt, encoding="utf-8")
                 try:
-                    frames, provenance = engine.pixel_process(raw, cfg, columns, rows, count, "magenta", True, True, True)
+                    if cfg.get('pixelFixer'):
+                        frames, provenance = pixel_fixer.process(raw,cfg,columns,rows,count,'magenta',source_dir)
+                    else:
+                        frames, provenance = engine.pixel_process(raw, cfg, columns, rows, count, "magenta", True, True, True)
                 except ValueError as exc:
                     raise ValueError(f"源图已保留为 {sid}.png，自动切片失败：{exc}。在项目的源稿列表下载后手动导入。") from exc
                 provenance.update(model=model, prompt=prompt, sourceId=sid)
@@ -309,13 +313,15 @@ def make_handler(store, jobs, cloud=False, password=""):
                     return self.output(store.read(path.rsplit("/", 1)[-1]))
                 if path.startswith("/api/jobs/"):
                     return self.output(jobs.snapshot(path.rsplit("/", 1)[-1]))
-                match = re.fullmatch(r"/api/sources/([a-f0-9]{32})(?:/([a-f0-9]{32}))?", path)
+                match = re.fullmatch(r"/api/sources/([a-f0-9]{32})(?:/([a-f0-9]{32})(\.json)?)?", path)
                 if match:
                     store.read(match[1])
                     folder = store.folder(match[1]) / "sources"
+                    if match[2] and match[3]:
+                        return self.output((folder / f"{match[2]}.json").read_bytes(),mime='application/json',filename=f"{match[2]}.json")
                     if match[2]:
                         return self.output((folder / f"{match[2]}.png").read_bytes(), mime="image/png", filename=f"{match[2]}.png")
-                    return self.output([p.stem for p in folder.glob("*.png")])
+                    return self.output([dict(id=p.stem,hasReport=p.with_suffix(".json").exists()) for p in folder.glob("*.png")])
                 relative = "index.html" if path == "/" else path.removeprefix("/static/")
                 if path != "/" and not path.startswith("/static/"):
                     raise FileNotFoundError()
@@ -346,8 +352,29 @@ def make_handler(store, jobs, cloud=False, password=""):
                         if p.get("id") and jobs.busy(p["id"]):
                             raise Conflict("生成期间暂不能编辑项目；取消或等待完成后再保存")
                         return self.output(store.save(p["project"], p.get("id"), p.get("version")))
+                if path == '/api/fix-clip':
+                    with jobs.lock:
+                        if jobs.busy(p['id']):raise Conflict('生成期间不能修复项目')
+                        project=store.read(p['id'])
+                        if project['version']!=p['version']:raise Conflict('项目已更新，请重新打开')
+                        original=next((c for c in project['clips'] if c['id']==p['clipId']),None)
+                        if original is None:raise ValueError('动作不存在')
+                        if len(project['clips'])>=32:raise ValueError('项目动作已达上限，请先导出或拆分项目')
+                        cfg=project['settings'];count=len(original['frames']);cols=min(4,count);rows=(count+cols-1)//cols
+                        atlas=Image.new('RGBA',(cols*cfg['width'],rows*cfg['height']))
+                        for i,f in enumerate(original['frames']):atlas.paste(engine.flatten(f,(cfg['width'],cfg['height'])),(i%cols*cfg['width'],i//cols*cfg['height']))
+                        frames,provenance=pixel_fixer.process(atlas,cfg,cols,rows,count,'keep',store.folder(p['id'])/'sources',force_step=p.get('forceStep',1))
+                        new=dict(original);new.update(id=original['id'][:48]+'_fixed_'+uuid.uuid4().hex[:6],frames=frames,provenance=provenance,review={'state':'candidate'})
+                        project['clips'].append(new)
+                        return self.output(store.save(project,p['id'],p['version']))
                 if path == "/api/process":
                     source = engine.decode_image(p["image"])
+                    if p.get('pixelFixer'):
+                        with jobs.lock:
+                            if jobs.busy(p['id']):raise Conflict('生成期间不能导入修复素材')
+                            store.read(p['id'])
+                            frames,provenance=pixel_fixer.process(source,p['settings'],p.get('columns',1),p.get('rows',1),p.get('count',1),p.get('background','keep'),store.folder(p['id'])/'sources',force_step=p.get('forceStep'))
+                        return self.output(dict(frames=frames,provenance=provenance))
                     frames, provenance = engine.pixel_process(source, p["settings"], p.get("columns", 1), p.get("rows", 1), p.get("count", 1), p.get("background", "keep"), p.get("quantize", False), p.get("outline", False), p.get("fit", True))
                     return self.output(dict(frames=frames, provenance=provenance))
                 if path == "/api/review":

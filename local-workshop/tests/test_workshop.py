@@ -150,6 +150,18 @@ class StoreAndJobTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,"均已存在"):
             jobs.start(dict(id=p["id"],enabled=True,key="fake",pack="single",action="walk",direction="e"))
 
+    def test_generation_fixer_opt_in_routes_through_shared_grid(self):
+        p=project();p['clips']=[];p['settings'].update(pixelFixer=True,hd2d=True,style='octopath');p=self.store.save(p)
+        jobs=server.Jobs(self.store,provider=lambda *args:(generated_sheet(),'mock'))
+        with patch('pixel_fixer.restore',side_effect=lambda im:(im,{'confidence':'high','forced':False})):
+            j=jobs.start(dict(id=p['id'],enabled=True,key='TEST_ONLY',pack='single',action='walk',direction='e'))
+            deadline=time.monotonic()+5
+            while jobs.busy() and time.monotonic()<deadline:time.sleep(.01)
+        self.assertEqual(jobs.snapshot(j['id'])['state'],'completed')
+        clip=self.store.read(p['id'])['clips'][0]
+        self.assertEqual(clip['provenance']['pixelFixer']['registration']['sharedScale'],1)
+        self.assertEqual(clip['review']['state'],'candidate')
+
     def test_cancel_retains_inflight_result_and_stops_followups(self):
         p=project();p["clips"]=[];p=self.store.save(p)
         started,release=threading.Event(),threading.Event();calls=[]
@@ -190,6 +202,28 @@ class HttpTests(unittest.TestCase):
     def post(self,path,body,headers=None):
         req=urllib.request.Request(self.url+path,json.dumps(body).encode(),headers={"Content-Type":"application/json","X-Workshop":self.csrf}|(headers or {}))
         with urllib.request.urlopen(req) as r:return json.load(r)
+
+    def test_import_fixer_ignores_resize_and_keeps_report(self):
+        p=self.post('/api/save',{'project':project()})
+        with patch('pixel_fixer.restore',side_effect=lambda im,**kw:(im,{'confidence':'medium','forced':True})):
+            response=self.post('/api/process',dict(id=p['id'],image=frame()['layers'][0]['data'],settings=p['settings'],pixelFixer=True,forceStep=1,columns=1,rows=1,count=1,fit=True,quantize=True,outline=True))
+        self.assertEqual(response['provenance']['transform']['sharedScale'],1)
+        items=self.get('/api/sources/'+p['id']);self.assertTrue(any(i['hasReport'] for i in items))
+        self.assertEqual(len(self.get('/api/projects/'+p['id'])['clips']),1)
+
+    def test_fix_clip_keeps_original_and_protects_version(self):
+        p=self.post('/api/save',{'project':project()})
+        body=dict(id=p['id'],version=p['version'],clipId='walk_e')
+        with patch('pixel_fixer.restore',side_effect=lambda im,**kw:(im,{'confidence':'medium','forced':True})):
+            fixed=self.post('/api/fix-clip',body)
+        self.assertEqual(len(fixed['clips']),2);self.assertEqual(fixed['clips'][0],p['clips'][0])
+        report=fixed['clips'][1]['provenance']['pixelFixer']
+        self.assertEqual(self.get(f"/api/sources/{p['id']}/{report['nativeId']}.json")['nativeId'],report['nativeId'])
+        self.assertEqual(fixed['clips'][1]['review']['state'],'candidate')
+        with self.assertRaises(urllib.error.HTTPError) as c:self.post('/api/fix-clip',body)
+        self.assertEqual(c.exception.code,409)
+        with self.assertRaises(urllib.error.HTTPError) as c:self.post('/api/fix-clip',body,{'X-Workshop':''})
+        self.assertEqual(c.exception.code,403)
 
     def test_delete_restore_http_guards(self):
         p=self.post('/api/save',{'project':project()});body=dict(id=p['id'],version=p['version'])
